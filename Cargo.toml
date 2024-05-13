@@ -1,5 +1,5 @@
 [package]
-name = "template"
+name = "rust-web"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
+enum_dispatch = "0.3.13"
