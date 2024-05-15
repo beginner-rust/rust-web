@@ -1,65 +1,64 @@
-use enum_dispatch::enum_dispatch;
+use std::collections::HashMap;
+use axum::{response::Html, routing::get, Router};
+use axum::extract::Path;
+use axum::extract::Query;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use axum::http::HeaderMap;
+use axum::Extension;
 
-#[enum_dispatch(People)]
-trait Person {
-    fn say_hello(&self);
-}
-//implementor struct 1
-struct Me {
-    name: &'static str,
-}
-
-impl Person for Me {
-    fn say_hello(&self) {
-        println!("Hello, it's me.")
-    }
+struct MyCounter {
+    counter: AtomicUsize,
 }
 
-#[warn(dead_code)]
-struct Grandma {
-    age: usize
+struct MyConfig {
+    text: String,
 }
 
-impl Person for Grandma {
-    fn say_hello(&self) {
-        println!("G'day!")
-    }
+#[tokio::main]
+async fn main() {
+    let shared_counter = Arc::new(MyCounter {
+        counter: AtomicUsize::new(0)
+    });
+
+    let shared_text = Arc::new(MyConfig {
+        text: "this is my config".to_string()
+    });
+
+
+    let app = Router::new()
+        .route("/", get(handler))
+        .route("/book/:name", get(path_handler))
+        .route("/book", get(query_path_handler))
+        .route("/header", get(header_handler))
+        .layer(Extension(shared_counter))
+        .layer(Extension(shared_text));
+
+    let addr = "127.0.0.1:3000";
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    println!("Listening on {}", addr);
+    axum::serve(listener, app).await.unwrap();
 }
 
-#[enum_dispatch]
-enum People {
-    Grandma(Grandma),
-    Me(Me)
-}
-//I thought enum_dispatch generated this impl for us automatically, so comment out
-//impl Person for People {
-//    fn say_hello(&self) {
-//        match self {
-//           People::Grandma(grandma) => grandma.say_hello(),
-//            People::Me(me) => me.say_hello()
-//        }
-//    }
-//}
-
-struct PeopleZoo<P: Person> {
-    people: Vec<P>,
+async fn header_handler(headers: HeaderMap) -> Html<String> {
+    Html(format!("{headers:#?}"))
 }
 
-impl<P: Person> PeopleZoo<P> {
-    fn add_person(&mut self, person: P) {
-        self.people.push(person);
-    }
-
-    fn last_person(&self) -> Option<&P> {
-        self.people.last()
-    }
+async fn handler(
+    Extension(counter): Extension<Arc<MyCounter>>,
+    Extension(config): Extension<Arc<MyConfig>>,
+) -> Html<String> {
+    counter.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Html(format!("{} hello {}",
+                 config.text,
+                 counter.counter.load(std::sync::atomic::Ordering::Relaxed)))
 }
 
-fn main() {
-    let mut zoo: PeopleZoo<People> = PeopleZoo { people: vec![] };
-    zoo.add_person(People::Me(Me { name: "Bennett" }));
+async fn path_handler(Path(name): Path<String>) -> Html<String> {
+    Html(format!("<h1>Hello, {}!</h1>", name))
+}
 
-    if let Some(People::Me(me)) = zoo.last_person() {
-        println!("My name is {}.", me.name)
-    }
+async fn query_path_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    Html(format!("{params:#?}"))
 }
