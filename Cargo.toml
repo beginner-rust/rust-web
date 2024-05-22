@@ -9,4 +9,13 @@ edition = "2021"
 axum = "0.7.5"
 clap = { version = "4.5.4", features = ["derive"] }
 enum_dispatch = "0.3.13"
+reqwest = "0.12.4"
 tokio = { version = "1.37.0", features = ["full"] }
+tower-http = { version = "0.5.2", features = ["fs", "trace", "compression-full"] }
+tracing-subscriber = { version = "0.3.18", features = ["json"] }
+log = "0.4.21"
+trace = "0.1.7"
+tracing = "0.1.40"
+uuid = { version = "1.8.0", features = ["v4"] }
+dotenvy = "0.15.7"
+config = "0.14.0"
