@@ -1,0 +1,196 @@
+use anyhow::Result;
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+    Router,
+    Json
+};
+use axum::extract::Query;
+use axum::Extension;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
+use axum::response::{Html, IntoResponse};
+use http::HeaderMap;
+use tower_http::services::ServeDir;
+use tracing::{debug, info, warn};
+use tower_http::trace::TraceLayer;
+use crate::Settings;
+
+#[derive(Debug)]
+struct HttpServeState {
+    path: PathBuf,
+}
+
+struct MyCounter {
+    counter: AtomicUsize,
+}
+struct Counter {
+    count: AtomicUsize,
+}
+struct MyConfig {
+    text: String,
+}
+
+struct MyState(i32);
+fn service_one()->Router {
+    let state: Arc<MyState> = Arc::new(MyState(5));
+    Router::new().route("/", get(sv1_handler)).with_state(state)
+}
+
+async fn sv1_handler(
+    Extension(counter): Extension<Arc<MyCounter>>,
+    State(state): State<Arc<MyState>>,
+) -> Html<String> {
+    counter.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Html(format!("service{}:{}", counter.counter.load(std::sync::atomic::Ordering::Relaxed), state.0))
+}
+
+
+pub async fn process_http_serve(path: PathBuf, port: u16,settings: &Settings) -> Result<()> {
+
+    let shared_counter = Arc::new(MyCounter {
+        counter: AtomicUsize::new(0)
+    });
+    let counter = Arc::new(Counter {
+        count: AtomicUsize::new(0)
+    });
+
+
+    let shared_text = Arc::new(MyConfig {
+        text: "this is my config".to_string()
+    });
+
+  //  let app = Router::new()
+        // .nest("/1", service_one())
+        //  .route("/", get(handler))
+        //  .route("/book/:name", get(path_handler))
+    //    .route("/book", get(query_path_handler))
+    //    .layer(TraceLayer::new_for_http());
+
+    // .route("/header", get(header_handler))
+    //     .route("/inc", get(increment))
+    //     .with_state(counter)
+    //     .route("/static",get(static_handler))
+    //     .fallback_service(ServeDir::new("web"));
+
+    // .layer(Extension(shared_counter))
+    // .layer(Extension(shared_text));
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!("Serving {:?} on {}", path, addr);
+    tracing::info!("Loaded configuration: {:?}", settings);
+
+
+
+    let state = HttpServeState { path: path.clone() };
+    // axum router
+    let router = Router::new()
+        .nest_service("/tower", ServeDir::new(path))
+        .route("/book", get(static_handler))
+        .layer(Extension(Arc::new(settings.clone())));
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+async fn static_handler(Extension(settings): Extension<Arc<Settings>>) -> std::result::Result<impl IntoResponse, StatusCode> {
+    info!("进入static_handler");
+    debug!("这是debug!!!!!");
+    info!("Loaded configuration in handler: {:?}", settings);
+    Ok(Html("<h1>Hello, world!</h1>".to_string()))
+}
+async fn header_handler(headers: HeaderMap) -> Html<String> {
+    Html(format!("{headers:#?}"))
+}
+
+async fn handler1(
+    Extension(counter): Extension<Arc<MyCounter>>,
+    Extension(config): Extension<Arc<MyConfig>>,
+) -> Html<String> {
+    counter.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Html(format!("{} hello {}",
+                 config.text,
+                 counter.counter.load(std::sync::atomic::Ordering::Relaxed)))
+}
+async fn handler() -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+    let start =std::time::SystemTime::now();
+    let second_warpped = start
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_|(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get current time".to_string()))?
+        .as_secs() % 3;
+    let divided = 100u64.checked_div(second_warpped)
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Failed to divide".to_string()))?;
+    Ok(Json(divided))
+}
+async fn path_handler(Path(name): Path<String>) -> Html<String> {
+    Html(format!("<h1>Hello, {}!</h1>", name))
+}
+
+async fn query_path_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    tracing::info!("hello world");
+
+    tracing::debug!("hello world");
+    Html(format!("{params:#?}"))
+}
+
+async fn increment (State(counter): State<Arc<Counter>>) -> Json<usize> {
+    println!("/inc service called");
+    let current = counter.count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Json(current)
+}
+
+async fn call_inc()-> Html<String> {
+    println!("/inc called");
+    let count = reqwest::get("http://localhost:3000/inc").await.unwrap().text().await.unwrap();
+
+    Html(format!("<h1>/inc called:{count}</h1>"))
+}
+async fn file_handler(
+    State(state): State<Arc<HttpServeState>>,
+    Path(path): Path<String>,
+) -> (StatusCode, String) {
+    let p = std::path::Path::new(&state.path).join(path);
+    info!("Reading file {:?}", p);
+    if !p.exists() {
+        (
+            StatusCode::NOT_FOUND,
+            format!("File {} note found", p.display()),
+        )
+    } else {
+        // TODO: test p is a directory
+        // if it is a directory, list all files/subdirectories
+        // as <li><a href="/path/to/file">file name</a></li>
+        // <html><body><ul>...</ul></body></html>
+        match tokio::fs::read_to_string(p).await {
+            Ok(content) => {
+                info!("Read {} bytes", content.len());
+                (StatusCode::OK, content)
+            }
+            Err(e) => {
+                warn!("Error reading file: {:?}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use super::*;
+
+    #[tokio::test]
+    async fn test_file_handler() {
+        // let state = Arc::new(HttpServeState {
+        //     path: PathBuf::from("."),
+        // });
+        // let (status, content) = file_handler(State(state), Path("Cargo.toml".to_string())).await;
+        // assert_eq!(status, StatusCode::OK);
+        // assert!(content.trim().starts_with("[package]"));
+    }
+}
