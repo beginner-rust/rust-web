@@ -1,4 +1,4 @@
-database_url = "sqlite://default.db"
+database_url = "mysql://"
 api_key = "default_api_key"
 log_level = "debug"
 log_file = "/httx/out.log"

@@ -16,7 +16,7 @@ pub enum HttpSubCommand {
 pub struct HttpServeOpts {
     #[arg(short, long, value_parser = verify_path, default_value = ".")]
     pub dir: PathBuf,
-    #[arg(short, long, default_value_t = 8080)]
+    #[arg(short, long, default_value_t = 3000)]
     pub port: u16,
 }
 
